@@ -5015,6 +5015,18 @@ const MC={tab:'douyin',busy:false,res:null,err:'',text:'',cfg:false};
 const MC_DEFAULT='https://mio.xiaoshui.top/api';
 const mcBase=()=>((S.cfg.mcpBase||'').trim()||MC_DEFAULT).replace(/\/+$/,'');
 const mcHdr=()=>Object.assign({'Content-Type':'application/json'},S.cfg.mcpToken?{'X-Token':S.cfg.mcpToken}:{});
+async function mcParseRemote(text,platform){
+  const base=mcBase();
+  const body=JSON.stringify({text,platform:platform||''});
+  if(window.MioBridge&&typeof window.MioBridge.mcParse==='function'){
+    try{return JSON.parse(window.MioBridge.mcParse(base,body,S.cfg.mcpToken||''))}
+    catch(e){return {ok:false,error:'解析桥异常：'+((e&&e.message)||e)}}
+  }
+  const ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),25000);
+  try{const r=await fetch(base+'/parse',{method:'POST',headers:mcHdr(),body,signal:ctl.signal});return await r.json()}
+  catch(e){return {ok:false,error:(e&&e.name==='AbortError')?'解析超时':('连不上解析服务：'+((e&&e.message)||e))}}
+  finally{clearTimeout(tm)}
+}
 const mcImg=u=>/^https?:\/\//i.test(u||'')?u:'';
 const mcNum=v=>v===undefined||v===null||v===''?'-':String(v);
 function mcCard(r){
@@ -5052,14 +5064,12 @@ async function mcGo(){
   if(MC.busy)return;const text=(MC.text||'').trim(),base=mcBase();
   if(!text){MC.err='先粘贴一个链接';return mcpRender()}
   MC.busy=true;MC.err='';MC.res=null;mcpRender();
-  const ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),25000);
   try{
-    const r=await fetch(base+'/parse',{method:'POST',headers:mcHdr(),body:JSON.stringify({text,platform:MC.tab}),signal:ctl.signal});
-    const j=await r.json().catch(()=>({ok:false,error:'服务返回的不是 JSON（HTTP '+r.status+'）'}));
-    if(!j.ok)MC.err=j.error||('解析失败（HTTP '+r.status+'）');
+    const j=await mcParseRemote(text,MC.tab);
+    if(!j.ok)MC.err=j.error||'解析失败';
     else{MC.res=j.data;const h=(S.mcpHist||[]).filter(x=>!(x.res&&x.res.url===j.data.url));h.unshift({id:uid(),t:Date.now(),res:j.data});S.mcpHist=h.slice(0,12);save()}
   }catch(e){MC.err=e&&e.name==='AbortError'?'解析超时（25 秒），稍后再试':'连不上解析服务：'+((e&&e.message)||e)+'。请检查服务地址、HTTPS 和跨域设置'}
-  finally{clearTimeout(tm);MC.busy=false;mcpRender()}
+  finally{MC.busy=false;mcpRender()}
 }
 $('#v-mcp').addEventListener('input',e=>{if(e.target.id==='mc-in')MC.text=e.target.value});
 $('#v-mcp').addEventListener('toggle',e=>{if(e.target.classList&&e.target.classList.contains('mc-set'))MC.cfg=e.target.open},true);
@@ -5364,14 +5374,11 @@ async function linksPrefetch(h){
   if(!todo.length)return;
   const list=todo.slice(0,3);
   await Promise.all(list.map(async u=>{
-    const ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),6000);
     try{
-      const r=await fetch(base+'/parse',{method:'POST',headers:mcHdr(),body:JSON.stringify({text:u}),signal:ctl.signal});
-      const j=await r.json();
+      const j=await mcParseRemote(u,'');
       if(j&&j.ok&&j.data){const d=j.data;c[u]={ok:1,t:now,res:{platform:d.platform,type:d.type,cover:d.cover||(d.images&&d.images[0])||'',title:d.title||'',desc:String(d.desc||'').slice(0,1500),author:(d.author&&d.author.name)||'',tags:(d.tags||[]).slice(0,8),stats:d.stats||{},url:d.url||u}}}
       else c[u]={ok:0,t:now,err:(j&&j.error)||'解析失败'};
-    }catch(e){c[u]={ok:0,t:now,err:e&&e.name==='AbortError'?'读取超时':'连不上解析服务'}}
-    finally{clearTimeout(tm)}
+    }catch(e){c[u]={ok:0,t:now,err:'连不上解析服务'}}
   }));
   const ks=Object.keys(c);if(ks.length>60)ks.sort((a,b)=>c[a].t-c[b].t).slice(0,ks.length-60).forEach(k=>{delete c[k]});
   save();try{lkFillCards()}catch(_){}
@@ -6141,13 +6148,13 @@ function lkFillCards(root){(root||document).querySelectorAll('.lk-card[data-u]')
     n.querySelector('.lk-tt').textContent=tt;n.querySelector('.lk-ds').textContent=ds;
     const c=n.querySelector('.lk-cv');if(cv){if(c.getAttribute('src')!==cv){c.onerror=()=>{c.style.display='none'};c.src=cv}c.style.display=''}else c.style.display='none'})}
 const __lkBusy={};
-async function lkEnsure(u){const base=mcBase();if(S.cfg.mcpAuto===false)return;const c=S.linkCache||(S.linkCache={}),e=c[u],now=Date.now();if(__lkBusy[u])return;if(e&&((e.ok&&e.res&&e.res.cover!==undefined)||(!e.ok&&now-e.t<6e5)))return;
-  __lkBusy[u]=1;const ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),15000);
-  try{const r=await fetch(base+'/parse',{method:'POST',headers:mcHdr(),body:JSON.stringify({text:u}),signal:ctl.signal});const j=await r.json();
+async function lkEnsure(u){if(S.cfg.mcpAuto===false)return;const c=S.linkCache||(S.linkCache={}),e=c[u],now=Date.now();if(__lkBusy[u])return;if(e&&((e.ok&&e.res&&e.res.cover!==undefined)||(!e.ok&&now-e.t<6e5)))return;
+  __lkBusy[u]=1;
+  try{const j=await mcParseRemote(u,'');
     if(j&&j.ok&&j.data){const d=j.data;c[u]={ok:1,t:now,res:{platform:d.platform,type:d.type,cover:d.cover||(d.images&&d.images[0])||'',title:d.title||'',desc:String(d.desc||'').slice(0,1500),author:(d.author&&d.author.name)||'',tags:(d.tags||[]).slice(0,8),stats:d.stats||{},url:d.url||u}}}
     else c[u]={ok:0,t:now,err:(j&&j.error)||'解析失败'}}
   catch(_){c[u]={ok:0,t:now,err:'连不上解析服务'}}
-  finally{clearTimeout(tm);delete __lkBusy[u]}
+  finally{delete __lkBusy[u]}
   save();try{lkFillCards()}catch(_){}}
 function lkRender(el,p){lkCss();el.classList.add('lk-msg');el.textContent='';
   const showTxt=p.txt&&!p.share;
