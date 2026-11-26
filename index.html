@@ -7293,6 +7293,8 @@ function notifyMsg(pid,m){
  requestAnimationFrame(()=>b.classList.add('on'));clearTimeout(notifyMsg.t);notifyMsg.t=setTimeout(()=>b.classList.remove('on'),4800);
 }
 async function xsjSysNotify(p,txt,pid){
+ const nm=(p&&p.name)||'Mio水汪汪';
+ if(window.MioBridge&&window.MioBridge.notify){try{window.MioBridge.notify(nm,String(txt||''),String((p&&p.avatar)||''),String(pid||''));return}catch(e){}}
  if(!('Notification' in window)||Notification.permission!=='granted')return;
  const o={body:txt,tag:'msg-'+pid,renotify:true,vibrate:[120,60,120],timestamp:Date.now(),data:{pid}};
  const a=p&&p.avatar;if(typeof a==='string'&&(/^https?:/.test(a)||(/^data:image\//.test(a)&&a.length<120000)))o.icon=a;
@@ -7300,6 +7302,8 @@ async function xsjSysNotify(p,txt,pid){
  try{const n=new Notification(p.name,o);n.onclick=()=>{window.focus();if(pid&&P(pid)){cur=pid;go('chat')}n.close()}}catch(e){}
 }
 window.xsjSysNotify=xsjSysNotify;
+window.__mioOpenChat=function(pid){try{if(pid&&P(pid)){cur=String(pid);go('chat')}}catch(e){}};
+window.__mioPerm=function(){try{if(window.__mioShowNotify)window.__mioShowNotify()}catch(e){}};
 try{if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost')){
  navigator.serviceWorker.register('sw.js',{updateViaCache:'none'}).catch(()=>{});
  navigator.serviceWorker.addEventListener('message',e=>{const d=e.data||{};if(d.type==='open-chat'&&d.pid&&P(d.pid)){cur=d.pid;go('chat')}});
@@ -7743,9 +7747,29 @@ function sysInit(){
  const ka=$('#c-keepalive'),nt=$('#c-notify'),st=$('#notify-status');if(!ka)return;
  ka.checked=!!S.cfg.keepAlive;ka.onchange=()=>{S.cfg.keepAlive=ka.checked;save();keepAlive(ka.checked)};
  nt.checked=S.cfg.notifyPopup!==false;nt.onchange=()=>{S.cfg.notifyPopup=nt.checked;save()};
- const show=()=>{st.textContent='系统通知权限：'+(('Notification' in window)?({granted:'已允许',denied:'已拒绝（需在系统设置里改）',default:'未设置'})[Notification.permission]:'当前浏览器不支持')+'。iOS 需先「添加到主屏幕」，且不保证后台一定送达。';try{navigator.serviceWorker.getRegistration().then(r=>{st.textContent+=' Service Worker：'+(r?'已就绪':'未注册（需 https 且已上传 sw.js）')}).catch(()=>{st.textContent+=' Service Worker：不可用（需要 https）'})}catch(e){st.textContent+=' Service Worker：不支持'}};show();
- $('#notify-perm').onclick=async()=>{if(!('Notification' in window))return toast('当前浏览器不支持系统通知');try{await Notification.requestPermission()}catch(e){}show()};
- const tb=$('#notify-test');if(tb)tb.onclick=async()=>{if(!('Notification' in window))return toast('当前浏览器不支持系统通知');if(Notification.permission!=='granted'){try{await Notification.requestPermission()}catch(e){}show()}if(Notification.permission!=='granted')return toast('还没有通知权限');toast('5 秒后发送，请现在切到后台或锁屏');setTimeout(()=>xsjSysNotify({name:'Mio水汪汪',avatar:''},'这是一条测试通知，点它回到小手机',''),5000)};
+ const isBridge=()=>!!(window.MioBridge&&window.MioBridge.notify);
+ const show=()=>{
+   if(isBridge()){
+     const g=!!(window.MioBridge.isGranted&&window.MioBridge.isGranted()==='1');
+     st.textContent='系统通知：'+(g?'已允许':'未允许（点下方按钮授权）')+'。当前为原生壳，通知走系统通知通道。';
+     return;
+   }
+   st.textContent='系统通知权限：'+(('Notification' in window)?({granted:'已允许',denied:'已拒绝（需在系统设置里改）',default:'未设置'})[Notification.permission]:'当前浏览器不支持')+'。iOS 需先「添加到主屏幕」，且不保证后台一定送达。';
+   try{navigator.serviceWorker.getRegistration().then(r=>{st.textContent+=' Service Worker：'+(r?'已就绪':'未注册（需 https 且已上传 sw.js）')}).catch(()=>{st.textContent+=' Service Worker：不可用（需要 https）'})}catch(e){st.textContent+=' Service Worker：不支持'}
+ };
+ show();window.__mioShowNotify=show;
+ $('#notify-perm').onclick=async()=>{
+   if(isBridge()){try{window.MioBridge.requestPermission()}catch(e){}return}
+   if(!('Notification' in window))return toast('当前浏览器不支持系统通知');
+   try{await Notification.requestPermission()}catch(e){}show();
+ };
+ const tb=$('#notify-test');if(tb)tb.onclick=async()=>{
+   if(isBridge()){toast('5 秒后发送，请现在切到后台或锁屏');setTimeout(()=>{try{window.MioBridge.notify('Mio水汪汪','这是一条测试通知，点它回到小手机','','')}catch(e){}},5000);return}
+   if(!('Notification' in window))return toast('当前浏览器不支持系统通知');
+   if(Notification.permission!=='granted'){try{await Notification.requestPermission()}catch(e){}show()}
+   if(Notification.permission!=='granted')return toast('还没有通知权限');
+   toast('5 秒后发送，请现在切到后台或锁屏');setTimeout(()=>xsjSysNotify({name:'Mio水汪汪',avatar:''},'这是一条测试通知，点它回到小手机',''),5000);
+ };
 }
 function secApiInit(){
  const g=id=>$('#'+id);if(!g('pull-sec-models'))return;
